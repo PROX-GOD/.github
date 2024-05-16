@@ -1,0 +1,196 @@
+import os
+import requests
+import base64
+
+class GitHubAPI:
+    def __init__(self, token):
+        self.token = token
+        self.headers = {
+            'Authorization': f'token {token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        self.base_url = 'https://api.github.com'
+
+    def create_repo(self, repo_name, description="", add_readme=False):
+        url = f'{self.base_url}/user/repos'
+        data = {'name': repo_name, 'description': description, 'auto_init': add_readme}
+        response = requests.post(url, headers=self.headers, json=data)
+        return response.json()
+
+    def delete_repo(self, repo_names):
+        success = []
+        for repo_name in repo_names:
+            url = f'{self.base_url}/repos/{repo_name}'
+            response = requests.delete(url, headers=self.headers)
+            if response.status_code == 204:
+                success.append(repo_name)
+        return success
+
+    def add_file(self, owner, repo_name, file_name, file_content):
+        url = f'{self.base_url}/repos/{owner}/{repo_name}/contents/{file_name}'
+        data = {
+            'message': 'Add new file',
+            'content': file_content
+        }
+        response = requests.put(url, headers=self.headers, json=data)
+        return response.status_code == 201
+
+    def add_folder(self, owner, repo_name, folder_path):
+        self.upload_folder(owner, repo_name, folder_path)
+        print("Folder added successfully.")
+    
+    def upload_folder(self, owner, repo_name, folder_path):
+        print(f"Uploading folder {folder_path} to repository {repo_name}...")
+        # API endpoint
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/"
+    
+        # Headers with authentication
+        headers = {
+            "Authorization": f"token {self.token}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+    
+        # Walk through the directory
+        for root, _, files in os.walk(folder_path):
+            # Loop through files in current directory
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+    
+                # Read file content
+                with open(file_path, "rb") as file:
+                    file_content = file.read()
+    
+                # Base64 encode file content
+                file_content_encoded = base64.b64encode(file_content).decode()
+    
+                # Create file payload
+                relative_path = os.path.relpath(file_path, folder_path)
+                payload = {
+                    "message": f"Upload {relative_path}",
+                    "content": file_content_encoded,
+                    "branch": "main"
+                }
+    
+                # Send POST request to create file
+                response = requests.put(url + relative_path, headers=headers, json=payload)
+    
+                # Check if request was successful
+                if response.status_code == 201:
+                    print(f"File '{relative_path}' uploaded successfully.")
+                else:
+                    print(f"Failed to upload file '{relative_path}'. Error: {response.json().get('message', '')}")
+    
+
+    
+    def get_user_repos(self, username):
+        url = f'{self.base_url}/users/{username}/repos'
+        response = requests.get(url, headers=self.headers)
+        return response.json()
+
+    def view_repo_contents(self, owner, repo_name):
+        url = f'{self.base_url}/repos/{owner}/{repo_name}/contents'
+        response = requests.get(url, headers=self.headers)
+        contents = response.json()
+        for item in contents:
+            print(item['name'])
+
+    def download_repo_contents(self, owner, repo_name, path):
+        url = f'{self.base_url}/repos/{owner}/{repo_name}/contents'
+        response = requests.get(url, headers=self.headers)
+        contents = response.json()
+        for item in contents:
+            if item['type'] == 'file':
+                content_url = item['download_url']
+                file_content = requests.get(content_url, headers=self.headers).text
+                with open(f'{path}/{item["name"]}', 'w') as f:
+                    f.write(file_content)
+
+# Function to clear the screen
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+# Example usage
+if __name__ == "__main__":
+    clear_screen()
+    token = input("Enter your GitHub token: ")
+    github_api = GitHubAPI(token)
+
+    while True:
+        clear_screen()
+        print("1) Create repo")
+        print("2) Delete Repo")
+        print("3) Add folder")
+        print("4) View Another User Repo")
+        print("5) Download code from your repo/other repo")
+        print("6) Exit")
+
+        choice = input("Enter your choice: ")
+
+        if choice == "1":
+            clear_screen()
+            repo_name = input("Enter repository name: ")
+            description = input("Enter repository description: ")
+            add_readme = input("Do you want to add a readme file (y/n): ").lower() == 'y'
+            new_repo = github_api.create_repo(repo_name, description, add_readme)
+            print("Repository created:", new_repo.get('html_url', ''))
+
+        elif choice == "2":
+            clear_screen()
+            username = input("Enter your GitHub username: ")
+            user_repos = github_api.get_user_repos(username)
+            for i, repo in enumerate(user_repos, 1):
+                print(f"{i}. {repo['name']}")
+            to_delete = input("Enter the number(s) of the repository to delete (use ',' to separate multiple numbers): ")
+            repos_to_delete = [user_repos[int(i) - 1]['full_name'] for i in to_delete.split(',')]
+            deleted_repos = github_api.delete_repo(repos_to_delete)
+            print("Deleted repositories:", deleted_repos)
+
+        elif choice == "3":
+            clear_screen()
+            username = input("Enter your GitHub username: ")
+            user_repos = github_api.get_user_repos(username)
+            for i, repo in enumerate(user_repos, 1):
+                print(f"{i}. {repo['name']}")
+            repo_num = int(input("Enter the repository number to add folder: "))
+            repo_name = user_repos[repo_num - 1]['name']
+            folder_path = input("Enter the folder location: ")
+            github_api.add_folder(username, repo_name, folder_path)
+            print("Folder added to repository.")
+
+        elif choice == "4":
+            clear_screen()
+            username = input("Enter username: ")
+            user_repos = github_api.get_user_repos(username)
+            for i, repo in enumerate(user_repos, 1):
+                print(f"{i}. {repo['name']}")
+            repo_num = int(input("Enter the repository number to view files inside: "))
+            repo_name = user_repos[repo_num - 1]['name']
+            github_api.view_repo_contents(username, repo_name)
+
+        elif choice == "5":
+            clear_screen()
+            download_from_other = input("Do you want to download from other users GitHub repo? (y/n): ").lower() == 'y'
+            if download_from_other:
+                username = input("Enter username: ")
+                user_repos = github_api.get_user_repos(username)
+                for i, repo in enumerate(user_repos, 1):
+                    print(f"{i}. {repo['name']}")
+                repo_num = int(input("Enter the repository number to download: "))
+                repo_name = user_repos[repo_num - 1]['name']
+                download_path = input("Enter download path: ")
+                github_api.download_repo_contents(username, repo_name, download_path)
+                print("Code downloaded successfully.")
+            else:
+                user_repos = github_api.get_user_repos(username)
+                for i, repo in enumerate(user_repos, 1):
+                    print(f"{i}. {repo['name']}")
+                repo_num = int(input("Enter the repository number to download: "))
+                repo_name = user_repos[repo_num - 1]['name']
+                download_path = input("Enter download path: ")
+                github_api.download_repo_contents(username, repo_name, download_path)
+                print("Code downloaded successfully.")
+                
+        elif choice == "6":
+            clear_screen()
+            print("Exiting program...")
+            break
